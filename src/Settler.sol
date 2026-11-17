@@ -9,7 +9,6 @@ contract Settler {
         uint64 timestamp;
         uint32 dataLength;
         address executor;
-        uint32 expectedGas;
     }
 
     // Words past dataLength are stale but ignored, and rewriting non-zero slots is cheap.
@@ -23,14 +22,14 @@ contract Settler {
     error TransferFailed();
     error InsufficientOutput(uint256 amountOut, uint256 amountOutMin);
 
-    function setRoute(address executor, uint32 expectedGas, bytes calldata data) external {
-        _routeHeader = RouteHeader(msg.sender, uint64(block.timestamp), uint32(data.length), executor, expectedGas);
+    function setRoute(address executor, bytes calldata data) external {
+        _routeHeader = RouteHeader(msg.sender, uint64(block.timestamp), uint32(data.length), executor);
         _storeRouteData(data);
     }
 
-    function peek() external view returns (address setter, uint32 expectedGas) {
+    function peek() external view returns (address setter) {
         RouteHeader storage header = _routeHeader;
-        if (_isLive(header)) return (header.setter, header.expectedGas);
+        if (_isLive(header)) return header.setter;
     }
 
     function swap(address tokenIn, uint256 amountIn, address tokenOut, uint256 amountOutMin, address recipient)
