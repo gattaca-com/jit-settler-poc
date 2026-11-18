@@ -24,6 +24,7 @@ This is a proof of concept and has not been audited.
 - **No fee logic.** The contract has no fees or treasury. Builders make sure they are paid during simulation.
 - **One route, used once.** A route is used by a single swap and is gone after it. Nothing is keyed or hashed, so there are no slot collisions, and a route never lingers into later blocks.
 - **One call for integrators.** Integrators just call `swap`. Builders always see the request in simulation, and every swap returns whether it was routed or not.
+- **Venues can see JIT flow.** While a route runs, `currentRoute()` returns its setter and the caller of `swap`, so a venue can quote tighter for builders it trusts. The router's address alone can't show this, since anyone can post a route through any router.
 - **The caller's own floor.** The integrator sets `amountOutMin` only once it knows a route is live, so it can first price its own route and demand more. `swap` checks it, so a plain `try`/`catch` gives a clean fallback. Nothing relies on the builder's word.
 - **Small trust surface.** The contract holds no funds, has no owner and can't be upgraded. Routes run from a sandbox that holds no approvals, so approving the settler is safe.
 - **No external dependencies.** No registry and no signatures. Posting a route is a single transaction.
@@ -35,7 +36,6 @@ This is a proof of concept and has not been audited.
 - Don't put `routeAvailable` behind a reentrancy guard. It is called while your own call to `swap` is still running, so a guard makes it revert and every route is silently declined.
 - Call `swap` in a `try`/`catch`, and run your own route unless it returns `EXECUTED`.
 - Approve the settler for `amountIn` of `tokenIn`. Doing it inside `routeAvailable` leaves no allowance behind when no route runs.
-- Pass a `gasLimit`. The route gets at most that much gas, so it can't eat the gas your own route needs, and builders only post routes that fit under it.
 
 ## Build
 

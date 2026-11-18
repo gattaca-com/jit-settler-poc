@@ -34,9 +34,15 @@ contract JITSettler {
 
     RouteHeader private _routeHeader;
 
-    /// @notice Emitted when a swap fills through a posted route. `caller` called `swap`.
+    // The route `swap` is running, set only while its executor runs.
+    address private transient _currentSetter;
+    address private transient _currentCaller;
+
+    /// @notice Emitted when a swap fills through a posted route. `caller` called `swap`, `setter`
+    ///         posted the route.
     event JITRoutedV1(
         address indexed caller,
+        address setter,
         address indexed tokenIn,
         address indexed tokenOut,
         address recipient,
@@ -57,16 +63,13 @@ contract JITSettler {
         _storeRouteData(data);
     }
 
-    /// @param gasLimit The most gas the route's executor gets, so a route cannot use up the gas
-    ///        the caller needs for its default route. Builders fit routes under it.
     /// @return outcome Whether the route ran. Unless `EXECUTED`, run your default route.
     /// @return amountOut What `recipient` received if `EXECUTED`, else 0.
     function swap(
         address tokenIn,
         uint256 amountIn,
         address tokenOut,
-        address recipient,
-        uint256 gasLimit
+        address recipient
     ) external returns (Outcome outcome, uint256 amountOut) {
         RouteHeader storage stored = _routeHeader;
         if (!_isLive(stored)) return (Outcome.NO_ROUTE, 0);
@@ -85,15 +88,35 @@ contract JITSettler {
 
         _transferFrom(tokenIn, msg.sender, header.executor, amountIn);
         uint256 balanceBefore = IERC20(tokenOut).balanceOf(recipient);
-        SANDBOX.run{ gas: gasLimit }(header.executor, data);
+        // Restore, not clear, so a swap nested inside an executor leaves the outer route visible.
+        (address prevSetter, address prevCaller) = (_currentSetter, _currentCaller);
+        (_currentSetter, _currentCaller) = (header.setter, msg.sender);
+        SANDBOX.run(header.executor, data);
+        (_currentSetter, _currentCaller) = (prevSetter, prevCaller);
         uint256 balanceAfter = IERC20(tokenOut).balanceOf(recipient);
         amountOut = balanceAfter > balanceBefore ? balanceAfter - balanceBefore : 0;
         if (amountOut < amountOutMin) revert InsufficientOutput(amountOut, amountOutMin);
 
         emit JITRoutedV1(
-            msg.sender, tokenIn, tokenOut, recipient, amountIn, amountOutMin, amountOut
+            msg.sender,
+            header.setter,
+            tokenIn,
+            tokenOut,
+            recipient,
+            amountIn,
+            amountOutMin,
+            amountOut
         );
         return (Outcome.EXECUTED, amountOut);
+    }
+
+    /// @notice The route this settler is running: its setter and the caller of `swap`. Both are 0
+    ///         unless called while a route's executor runs.
+    /// @dev Lets a venue tell flow routed by a builder it trusts from other flow, for example to
+    ///      quote a tighter spread. A venue checks `setter` against its own list, and optionally
+    ///      `caller` against known aggregators. Only `swap` writes these values.
+    function currentRoute() external view returns (address setter, address caller) {
+        return (_currentSetter, _currentCaller);
     }
 
     function _isLive(RouteHeader storage header) private view returns (bool) {
